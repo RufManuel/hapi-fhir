@@ -2,11 +2,14 @@ package ca.uhn.fhir.rest.server.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
+import org.apache.http.HttpEntity;
+import org.apache.http.util.EntityUtils;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
@@ -15,8 +18,8 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.BeforeEachClass;
 import org.junit.jupiter.api.Test;
 import org.mitre.oauth2.model.RegisteredClient;
 import org.mitre.openid.connect.client.service.impl.StaticClientConfigurationService;
@@ -25,7 +28,7 @@ import org.mitre.openid.connect.config.ServerConfiguration;
 
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.model.api.IResource;
-import ca.uhn.fhir.model.dstu.resource.Observation;
+import ca.uhn.fhir.model.dstu2.resource.Observation;
 import ca.uhn.fhir.rest.annotation.Search;
 import ca.uhn.fhir.rest.server.IResourceProvider;
 import ca.uhn.fhir.rest.server.RestfulServer;
@@ -74,8 +77,11 @@ public class OpenIdConnectBearerTokenServerInterceptorIntegrationTest {
 				"Bearer "
 						+ "eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjE0MDY4NDE4NTgsImF1ZCI6WyJjbGllbnQiXSwiaXNzIjoiaHR0cDpcL1wvbG9jYWxob3N0Ojg4ODhcL3Vobi1vcGVuaWQtY29ubmVjdFwvIiwianRpIjoiOTNiMzRjOTUtNTNiMC00YzZmLTkwYjEtYWVjODRjZTc3OGFhIiwiaWF0IjoxNDA2ODM4MjU4fQ.fYtwehPUulUYnDG_10bN6TNf7uw2FNUh_E40YagpITrVfXsV06pjU2YpNgy8nbSFmxY9IBH44UXTmMH9PLFiRn88WsPMSrUQbFCcvGIYwhqkRjGm_J1Y6oWIafUzCwZBCvk4Ne44p3DJRR6FSZRnnC850p55901DGQmNLe-rZJk3t0MHl6wySduqT3K1-Vbuq-7H6xLE10hKpLhSqBTghpQNKNjm48jm0sHcFa3ENWzyWPOmpNfzDKmJAYK2UnBtqNSJP6AJzVrJXqSu-uzasq0VOVcRU4n8b39vU1olbho1eKF0cfQlQwbrtvWipBJJSsRp_tmB9SV9BXhENxOFTw");
 		HttpResponse status = ourClient.execute(httpGet);
-		IOUtils.closeQuietly(status.getEntity().getContent());
 		assertEquals(200, status.getStatusLine().getStatusCode());
+		
+		String responseXml = EntityUtils.toString(status.getEntity());
+		EntityUtils.consume(status.getEntity());
+		assertEquals(true, responseXml.contains("This is an observation"));
 	}
 
 	@BeforeEach
@@ -127,7 +133,7 @@ public class OpenIdConnectBearerTokenServerInterceptorIntegrationTest {
 		servlet.registerInterceptor(myInterceptor);
 
 		ourServer.setHandler(proxyHandler);
-		JettyUtil.startServer(ourServer);
+		ourServer.start();
 
 		PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager(5000, TimeUnit.MILLISECONDS);
 		HttpClientBuilder builder = HttpClientBuilder.create();
@@ -147,8 +153,8 @@ public class OpenIdConnectBearerTokenServerInterceptorIntegrationTest {
 		public Observation search() {
 			Observation o = new Observation();
 			o.setId("1");
-
-			o.getName().setText("This is an observation");
+			
+			o.getText().setDiv("This is an observation");
 
 			return o;
 		}

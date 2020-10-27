@@ -26,23 +26,23 @@ import java.util.Date;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.mitre.jwt.signer.service.JwtSigningAndValidationService;
+import org.mitre.jwt.signer.service.JWTSigningAndValidationService;
 import org.mitre.jwt.signer.service.impl.JWKSetCacheService;
-import org.mitre.jwt.signer.service.impl.SymmetricCacheService;
+import org.mitre.jwt.signer.service.impl.SymmetricKeyJWTValidatorCacheService;
 import org.mitre.oauth2.model.RegisteredClient;
 import org.mitre.openid.connect.client.service.ClientConfigurationService;
 import org.mitre.openid.connect.client.service.ServerConfigurationService;
 import org.mitre.openid.connect.config.ServerConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import ca.uhn.fhir.rest.method.OtherOperationTypeEnum;
-import ca.uhn.fhir.rest.method.RequestDetails;
-import ca.uhn.fhir.rest.server.Constants;
+import ca.uhn.fhir.rest.api.server.RequestDetails;
+import ca.uhn.fhir.rest.api.RestOperationTypeEnum;
+import ca.uhn.fhir.rest.api.Constants;
 import ca.uhn.fhir.rest.server.exceptions.AuthenticationException;
 import ca.uhn.fhir.rest.server.interceptor.InterceptorAdapter;
 
 import com.nimbusds.jose.JWSAlgorithm;
-import com.nimbusds.jwt.ReadOnlyJWTClaimsSet;
+import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 
 public class OpenIdConnectBearerTokenServerInterceptor extends InterceptorAdapter {
@@ -57,18 +57,18 @@ public class OpenIdConnectBearerTokenServerInterceptor extends InterceptorAdapte
 
 	private int myTimeSkewAllowance = 300;
 
-	private SymmetricCacheService mySymmetricCacheService;
+	private SymmetricKeyJWTValidatorCacheService mySymmetricCacheService;
 	private JWKSetCacheService myValidationServices;
 
 	public OpenIdConnectBearerTokenServerInterceptor() {
-		mySymmetricCacheService = new SymmetricCacheService();
+		mySymmetricCacheService = new SymmetricKeyJWTValidatorCacheService();
 		myValidationServices = new JWKSetCacheService();
 	}
 	
 	
 	@Override
 	public boolean incomingRequestPostProcessed(RequestDetails theRequestDetails, HttpServletRequest theRequest, HttpServletResponse theResponse) throws AuthenticationException {
-		if (theRequestDetails.getOtherOperationType() == OtherOperationTypeEnum.METADATA) {
+		if (theRequestDetails.getRestOperationType() == RestOperationTypeEnum.METADATA) {
 			return true;
 		}
 		
@@ -76,8 +76,6 @@ public class OpenIdConnectBearerTokenServerInterceptor extends InterceptorAdapte
 		
 		return true;
 	}
-
-
 
 
 	public void authenticate(HttpServletRequest theRequest) throws AuthenticationException {
@@ -99,13 +97,13 @@ public class OpenIdConnectBearerTokenServerInterceptor extends InterceptorAdapte
 		}
 
 		// validate our ID Token over a number of tests
-		ReadOnlyJWTClaimsSet idClaims;
+		JWTClaimsSet idClaims;
 		try {
 			idClaims = idToken.getJWTClaimsSet();
 		} catch (ParseException e) {
 			throw new AuthenticationException("Not authorized (bearer token could not be validated)", e);
 		}
-
+		
 		String issuer = idClaims.getIssuer();
 
 		ServerConfiguration serverConfig = myServerConfigurationService.getServerConfiguration(issuer);
@@ -121,7 +119,7 @@ public class OpenIdConnectBearerTokenServerInterceptor extends InterceptorAdapte
 		}
 
 		// check the signature
-		JwtSigningAndValidationService jwtValidator = null;
+		JWTSigningAndValidationService jwtValidator = null;
 
 		JWSAlgorithm alg = idToken.getHeader().getAlgorithm();
 		if (alg.equals(JWSAlgorithm.HS256) || alg.equals(JWSAlgorithm.HS384) || alg.equals(JWSAlgorithm.HS512)) {
