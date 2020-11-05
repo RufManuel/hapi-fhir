@@ -11,7 +11,6 @@ import ca.uhn.fhir.jpa.model.entity.NpmPackageEntity;
 import ca.uhn.fhir.jpa.model.entity.NpmPackageVersionEntity;
 import ca.uhn.fhir.jpa.model.entity.NpmPackageVersionResourceEntity;
 import ca.uhn.fhir.jpa.searchparam.SearchParameterMap;
-import ca.uhn.fhir.jpa.searchparam.registry.ISearchParamRegistry;
 import ca.uhn.fhir.rest.api.Constants;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.param.ReferenceParam;
@@ -21,6 +20,7 @@ import ca.uhn.fhir.rest.server.exceptions.InternalErrorException;
 import ca.uhn.fhir.test.utilities.JettyUtil;
 import ca.uhn.fhir.test.utilities.ProxyUtil;
 import ca.uhn.fhir.util.JsonUtil;
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -33,7 +33,7 @@ import org.hl7.fhir.r4.model.PractitionerRole;
 import org.hl7.fhir.r4.model.Reference;
 import org.hl7.fhir.r4.model.SearchParameter;
 import org.hl7.fhir.r4.model.StructureDefinition;
-import org.hl7.fhir.utilities.cache.NpmPackage;
+import org.hl7.fhir.utilities.npm.NpmPackage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -48,6 +48,7 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +62,7 @@ import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class NpmTestR4 extends BaseJpaR4Test {
 
@@ -236,6 +238,59 @@ public class NpmTestR4 extends BaseJpaR4Test {
 		});
 	}
 
+	@Test
+	public void testInstallR4Package_NonConformanceResources() throws Exception {
+		myDaoConfig.setAllowExternalReferences(true);
+
+		byte[] bytes = loadClasspathBytes("/packages/test-organizations-package.tgz");
+		myFakeNpmServlet.myResponses.put("/test-organizations/1.0.0", bytes);
+
+		List<String> resourceList = new ArrayList<>();
+		resourceList.add("Organization");
+		PackageInstallationSpec spec = new PackageInstallationSpec().setName("test-organizations").setVersion("1.0.0").setInstallMode(PackageInstallationSpec.InstallModeEnum.STORE_AND_INSTALL);
+		spec.setInstallResourceTypes(resourceList);
+		PackageInstallOutcomeJson outcome = igInstaller.install(spec);
+		assertEquals(3, outcome.getResourcesInstalled().get("Organization"));
+
+		// Be sure no further communication with the server
+		JettyUtil.closeServer(myServer);
+
+		// Search for the installed resources
+		runInTransaction(() -> {
+			SearchParameterMap map = SearchParameterMap.newSynchronous();
+			map.add(Organization.SP_IDENTIFIER, new TokenParam("https://github.com/synthetichealth/synthea", "organization1"));
+			IBundleProvider result = myOrganizationDao.search(map);
+			assertEquals(1, result.sizeOrThrowNpe());
+			map = SearchParameterMap.newSynchronous();
+			map.add(Organization.SP_IDENTIFIER, new TokenParam("https://github.com/synthetichealth/synthea", "organization2"));
+			result = myOrganizationDao.search(map);
+			assertEquals(1, result.sizeOrThrowNpe());
+			map = SearchParameterMap.newSynchronous();
+			map.add(Organization.SP_IDENTIFIER, new TokenParam("https://github.com/synthetichealth/synthea", "organization3"));
+			result = myOrganizationDao.search(map);
+			assertEquals(1, result.sizeOrThrowNpe());
+		});
+
+	}
+
+	@Test
+	public void testInstallR4Package_NoIdentifierNoUrl() throws Exception {
+		myDaoConfig.setAllowExternalReferences(true);
+
+		byte[] bytes = loadClasspathBytes("/packages/test-missing-identifier-package.tgz");
+		myFakeNpmServlet.myResponses.put("/test-organizations/1.0.0", bytes);
+
+		List<String> resourceList = new ArrayList<>();
+		resourceList.add("Organization");
+		PackageInstallationSpec spec = new PackageInstallationSpec().setName("test-organizations").setVersion("1.0.0").setInstallMode(PackageInstallationSpec.InstallModeEnum.STORE_AND_INSTALL);
+		spec.setInstallResourceTypes(resourceList);
+		try {
+			PackageInstallOutcomeJson outcome = igInstaller.install(spec);
+			fail();
+		} catch (ImplementationGuideInstallationException theE) {
+			assertThat(theE.getMessage(), containsString("Resources in a package must have a url or identifier to be loaded by the package installer."));
+		}
+	}
 
 	@Test
 	public void testInstallR4Package_DraftResourcesNotInstalled() throws Exception {
@@ -600,7 +655,12 @@ public class NpmTestR4 extends BaseJpaR4Test {
 				ourLog.info("Responding to request: {}", requestUrl);
 
 				resp.setStatus(200);
-				resp.setHeader(Constants.HEADER_CONTENT_TYPE, "application/gzip");
+
+				if (StringUtils.countMatches(requestUrl, "/") == 1) {
+					resp.setHeader(Constants.HEADER_CONTENT_TYPE, Constants.CT_JSON);
+				}else {
+					resp.setHeader(Constants.HEADER_CONTENT_TYPE, "application/gzip");
+				}
 				resp.getOutputStream().write(myResponses.get(requestUrl));
 				resp.getOutputStream().close();
 			} else {
